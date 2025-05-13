@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
@@ -81,27 +80,23 @@ class NovelDownloaderGUI(ctk.CTk):
         main_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
         main_frame.grid_columnconfigure(1, weight=1)
 
-        self.epub_var = ctk.BooleanVar(value=False)
-        epub_check = ctk.CTkCheckBox(
-            main_frame,
-            text="生成EPUB电子书",
-            variable=self.epub_var
-        )
-        epub_check.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="w")
-        
         # 小说ID输入区域
-        id_label = ctk.CTkLabel(main_frame, text="小说ID:", anchor="w")
+        id_label = ctk.CTkLabel(main_frame, text="批量小说ID:", anchor="w")
         id_label.grid(row=0, column=0, padx=(0, 10), pady=10, sticky="w")
         
-        self.novel_id = ctk.CTkEntry(main_frame, placeholder_text="输入番茄小说ID")
+        self.novel_id = ctk.CTkEntry(main_frame, placeholder_text="输入番茄小说ID（批量用,分隔）")
         self.novel_id.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
+        
+        # 添加说明文本
+        id_tip_label = ctk.CTkLabel(main_frame, text="批量输入小说ID用英文,分隔可以批量下载", anchor="w", text_color="gray")
+        id_tip_label.grid(row=1, column=0, columnspan=2, padx=(0, 10), pady=(0, 10), sticky="w")
         
         # 保存路径区域
         path_label = ctk.CTkLabel(main_frame, text="保存路径:", anchor="w")
-        path_label.grid(row=1, column=0, padx=(0, 10), pady=10, sticky="w")
+        path_label.grid(row=2, column=0, padx=(0, 10), pady=10, sticky="w")
         
         self.save_path = ctk.CTkEntry(main_frame, placeholder_text="选择保存位置")
-        self.save_path.grid(row=1, column=1, padx=5, pady=10, sticky="ew")
+        self.save_path.grid(row=2, column=1, padx=5, pady=10, sticky="ew")
         self.save_path.insert(0, CONFIG["file"].get("default_save_path", "downloads"))
         
         # 浏览按钮
@@ -113,7 +108,7 @@ class NovelDownloaderGUI(ctk.CTk):
             image=self.icons.get("folder"),
             compound="left" if "folder" in self.icons else "none"
         )
-        browse_button.grid(row=1, column=2, padx=5, pady=10)
+        browse_button.grid(row=2, column=2, padx=5, pady=10)
         
         # 下载按钮
         self.download_button = ctk.CTkButton(
@@ -124,7 +119,7 @@ class NovelDownloaderGUI(ctk.CTk):
             image=self.icons.get("download"),
             compound="left" if "download" in self.icons else "none"
         )
-        self.download_button.grid(row=1, column=3, padx=5, pady=10)
+        self.download_button.grid(row=2, column=3, padx=5, pady=10)
         
         # 书库按钮
         library_button = ctk.CTkButton(
@@ -136,6 +131,15 @@ class NovelDownloaderGUI(ctk.CTk):
             compound="left" if "library" in self.icons else "none"
         )
         library_button.grid(row=0, column=3, padx=5, pady=10)
+
+        # EPUB选项
+        self.epub_var = ctk.BooleanVar(value=False)
+        epub_check = ctk.CTkCheckBox(
+            main_frame,
+            text="生成EPUB电子书",
+            variable=self.epub_var
+        )
+        epub_check.grid(row=3, column=0, columnspan=4, padx=5, pady=5, sticky="w")
         
         # 进度区域
         progress_frame = ctk.CTkFrame(self)
@@ -215,9 +219,15 @@ class NovelDownloaderGUI(ctk.CTk):
             messagebox.showwarning("提示", "下载正在进行中")
             return
         
-        novel_id = self.novel_id.get().strip()
-        if not novel_id:
+        novel_ids = self.novel_id.get().strip()
+        if not novel_ids:
             messagebox.showerror("错误", "请输入小说ID")
+            return
+        
+        # 分割ID并去除空格
+        novel_id_list = [id.strip() for id in novel_ids.split(',') if id.strip()]
+        if not novel_id_list:
+            messagebox.showerror("错误", "请输入有效的小说ID")
             return
         
         save_path = self.save_path.get().strip()
@@ -241,9 +251,32 @@ class NovelDownloaderGUI(ctk.CTk):
         self.downloaded_chapters.clear()
         self.content_cache.clear()
         
-        threading.Thread(target=self.download_novel,
-                       args=(novel_id, save_path),
+        threading.Thread(target=self.batch_download_novels,
+                       args=(novel_id_list, save_path),
                        daemon=True).start()
+    
+    def batch_download_novels(self, novel_id_list, save_path):
+        """批量下载小说"""
+        total_novels = len(novel_id_list)
+        for index, novel_id in enumerate(novel_id_list, 1):
+            try:
+                self.log(f"\n开始下载第 {index}/{total_novels} 本小说 (ID: {novel_id})")
+                self.downloaded_chapters.clear()
+                self.content_cache.clear()
+                self.download_novel(novel_id, save_path)
+                
+                # 如果不是最后一本书，等待5秒后继续下载下一本
+                if index < total_novels:
+                    self.log(f"\n等待5秒后开始下载下一本...")
+                    time.sleep(5)
+                
+            except Exception as e:
+                self.log(f"\n下载ID为 {novel_id} 的小说时出错：{str(e)}")
+                continue
+        
+        self.log("\n所有小说下载完成！")
+        self.download_button.configure(state="normal")
+        self.is_downloading = False
     
     def download_novel(self, book_id, save_path):
         """下载小说的具体实现"""
@@ -269,7 +302,10 @@ class NovelDownloaderGUI(ctk.CTk):
             os.makedirs(save_path, exist_ok=True)
             
             # 创建文件并写入信息
-            output_file = os.path.join(save_path, f"{name}.txt")
+            # 替换文件名中的非法字符
+            safe_name = name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            safe_author = author_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            output_file = os.path.join(save_path, f"{safe_name}_{safe_author}_{book_id}.txt")
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(f"书名：《{name}》\n作者：{author_name}\n\n简介：\n{description}\n\n")
             
@@ -344,7 +380,7 @@ class NovelDownloaderGUI(ctk.CTk):
             add_to_library(book_id, book_info, output_file)
             self.log("已添加到书库")
             
-            messagebox.showinfo("完成", f"小说《{name}》下载完成！\n保存路径：{output_file}")
+            self.log(f"\n小说《{name}》下载完成！\n保存路径：{output_file}")
 
             if self.epub_var.get() and success_count > 0:
                 try:
@@ -368,11 +404,7 @@ class NovelDownloaderGUI(ctk.CTk):
         except Exception as e:
             self.log(f"\n错误：{str(e)}")
             self.update_progress(0, f"下载失败: {str(e)}")
-            messagebox.showerror("错误", f"下载失败: {str(e)}")
-        except Exception as e:
-            self.log(f"\n错误：{str(e)}")
-            self.update_progress(0, f"下载失败: {str(e)}")
-            messagebox.showerror("错误", f"下载失败: {str(e)}")
+            self.log(f"下载失败: {str(e)}")
         
         finally:
             self.download_button.configure(state="normal")
